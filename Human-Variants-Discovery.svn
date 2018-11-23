@@ -5,21 +5,21 @@ echo $HOSTNAME
 
 echo $"Written by"  'Gerald Mboowa 🙏🧘 🍷🐒😍 ☣ 🇩🇪 ' | sed $'s/Gerald Mboowa 🙏🧘 🍷🐒😍 ☣ 🇩🇪 /\e[32m&\e[0m/';
 
-echo $"This is" 'FastQC MultiQC Snippy Rapid Bacterial SNP Calling Script  Version 1.0.0' | sed $'s/FastQC MultiQC Snippy Rapid Bacterial SNP Calling Script  Version 1.0.0/\e[36m&\e[0m/';
+echo $"This is" 'FastQC MultiQC Human Variant Calling Script  Version 1.0.0' | sed $'s/astQC MultiQC Human Variant Calling Script  Version 1.0.0/\e[36m&\e[0m/';
 
-echo $"Author email"  'gmboowa@gmail.com' or 'gerald.mboowa@chs.mak.ac.ug' or 'mboowa@bcm.edu' or 'mboowa@alumni.bcm.edu' | sed $'s/gmboowa@gmail.com or gerald.mboowa@chs.mak.ac.ug or mboowa@bcm.edu or mboowa@alumni.bcm.edu/\e[33m&\e[0m/';
+echo $"Author email"  '...@gmail.com' or '...@chs.mak.ac.ug' or '...@bcm.edu' or '...@alumni.bcm.edu' or '@cam.ac.uk' | sed $'s/...@gmail.com or ...@chs.mak.ac.ug or ...@bcm.edu or ...@alumni.bcm.edu or ...@cam.ac.uk/\e[33m&\e[0m/';
 
 cd ~/working-directory
 
 echo $"Now Running FastQC for the fastq Samples" | sed $'s/Now Running FastQC for the fastq Samples/\e[32m&\e[0m/' ;
 
-fastqc *.fastq.gz
+fastqc ${sample}*_1.fastq.gz  ${sample}*_2.fastq.gz
 
 echo $"Now Running MultiQC for the FastQC Products" | sed $'s/Now Running MultiQC for the FastQC Products/\e[36m&\e[0m/';
 
 multiqc .
 
-for sample in `cat sample-list.txt`
+for sample in `cat list.txt`
 do
     R1=${sample}_R1.fastq.gz
     R2=${sample}_R2.fastq.gz
@@ -47,37 +47,37 @@ samtools index ${sample}_sorted_dedup_reads.bam
 
 echo $"Now Running TargetCreatorRealigner using GATK" | sed $'s/Now Running TargetCreatorRealigner using GATK/\e[31m&\e[0m/';
 
-java -jar /usr/local/bin/GenomeAnalysisTK.jar -T RealignerTargetCreator -R ~/human_g1k_v37.fa -I ${sample}_sorted_dedup_reads.bam --known ~/Know-snps-Indels/Mills_and_1000G_gold_standard.indels.hg19.sites.vcf.gz -o ${sample}_forIndelRealigner.intervals
+java -jar ~/GenomeAnalysisTK.jar -T RealignerTargetCreator -R ~/human_g1k_v37.fa -I ${sample}_sorted_dedup_reads.bam --known ~/Know-snps-Indels/Mills_and_1000G_gold_standard.indels.hg19.sites.vcf.gz -o ${sample}_forIndelRealigner.intervals
 
 echo $"Now Running IndelRealignment using GATK" | sed $'s/Now Running IndelRealignment using GATK/\e[31m&\e[0m/';
 
-java -jar /usr/local/bin/GenomeAnalysisTK.jar -T IndelRealigner -R ~/human_g1k_v37.fa -I ${sample}_sorted_dedup_reads.bam -known ~/Know-snps-Indels/Mills_and_1000G_gold_standard.indels.hg19.sites.vcf.gz -targetIntervals ${sample}_forIndelRealigner.intervals -o ${sample}_Realigned_sorted_dedup_reads.bam
+java -jar ~/GenomeAnalysisTK.jar -T IndelRealigner -R ~/human_g1k_v37.fa -I ${sample}_sorted_dedup_reads.bam -known ~/Know-snps-Indels/Mills_and_1000G_gold_standard.indels.hg19.sites.vcf.gz -targetIntervals ${sample}_forIndelRealigner.intervals -o ${sample}_Realigned_sorted_dedup_reads.bam
 
 ##Generates an index for the bam automatically and continues on
 
 echo $"Now Running BaseRecalibration using GATK" | sed $'s/Now Running BaseRecalibration using GATK/\e[31m&\e[0m/';
 
-java -jar /usr/local/bin/GenomeAnalysisTK.jar -T BaseRecalibrator -R ~/human_g1k_v37.fasta -I ${sample}_sorted_dedup_reads.bam -knownSites ~/Know-snps-Indels/dbsnp.147.vcf.gz -o ${sample}_recal.table
+java -jar ~/GenomeAnalysisTK.jar -T BaseRecalibrator -R ~/human_g1k_v37.fasta -I ${sample}_sorted_dedup_reads.bam -knownSites ~/Know-snps-Indels/dbsnp.147.vcf.gz -o ${sample}_recal.table
 
 echo $"Now Running PrintReads using GATK" | sed $'s/Now Running PrintReads using GATK/\e[31m&\e[0m/';
 
-java -jar /usr/local/bin/GenomeAnalysisTK.jar -T PrintReads -R ~/human_g1k_v37.fasta -I ${sample}_Realigned_sorted_dedup_reads.bam -BQSR ${sample}_recal.table -o ${sample}_Re_calibrated_Realigned_sorted_dedup.bam
+java -jar ~/GenomeAnalysisTK.jar -T PrintReads -R ~/human_g1k_v37.fasta -I ${sample}_Realigned_sorted_dedup_reads.bam -BQSR ${sample}_recal.table -o ${sample}_Re_calibrated_Realigned_sorted_dedup.bam
 
 echo $"Now Running Variant Discovery and Calling using GATK HaplotypeCaller" | sed $'s/Now Running Variant Discovery and Calling using GATK HaplotypeCaller/\e[31m&\e[0m/';
 
-java -jar /usr/local/bin/GenomeAnalysisTK.jar -T HaplotypeCaller -R ~/human_g1k_v37.fa -I ${sample}_Re_calibrated_Realigned_sorted_dedup.bam -o ${sample}_calls.vcf
+java -jar ~/GenomeAnalysisTK.jar -T HaplotypeCaller -R ~/human_g1k_v37.fa -I ${sample}_Re_calibrated_Realigned_sorted_dedup.bam -o ${sample}_calls.vcf
 
 ## Variant annotation using Annovar and selected databases
 
 echo $"Now Running Converting VCF to VCF4old that is Compatible with Annovar" | sed $'s/Now Running Converting VCF to VCF4old that is Compatible with Annovar/\e[31m&\e[0m/';
 
-perl /usr/local/bin/annovar/convert2annovar.pl --includeinfo -format vcf4old ${sample}_Re_UG_calls.vcf > ${sample}_calls.avinput
+perl ~/annovar/convert2annovar.pl --includeinfo -format vcf4old ${sample}_calls.vcf > ${sample}_calls.avinput
 
 echo $"Now Running Annotation of the Variants using Annovar" | sed $'s/Now Running Annotation of the Variants using Annovar/\e[31m&\e[0m/';
 
-perl /usr/local/bin/annovar/table_annovar.pl ${sample}.avinput /usr/local/bin/annovar/humandb/ -buildver hg19 -out ${sample}_myanno -remove -protocol refGene,cytoBand,genomicSuperDups,snp138,esp6500siv2_all,ljb26_all,1000g2015aug_afr,1000g2015aug_eas,1000g2015aug_eur,avsift,clinvar_20180603,dbnsfp30a,icgc21,exac03,exac03nonpsych,gerp++elem,caddgt20,gnomad_exome,gnomad_genome -operation g,r,r,f,f,f,f,f,f,f,f,f,f,f,f,f,f,f,f -nastring . -csvout
+perl ~/annovar/table_annovar.pl ${sample}.avinput ~/annovar/humandb/ -buildver hg19 -out ${sample}_myanno -remove -protocol refGene,cytoBand,genomicSuperDups,snp138,esp6500siv2_all,ljb26_all,1000g2015aug_afr,1000g2015aug_eas,1000g2015aug_eur,avsift,clinvar_20180603,dbnsfp30a,icgc21,exac03,exac03nonpsych,gerp++elem,caddgt20,gnomad_exome,gnomad_genome -operation g,r,r,f,f,f,f,f,f,f,f,f,f,f,f,f,f,f,f -nastring . -csvout
 
-echo $"Did you know that you can also make these scripts yourself only when you put in time to learning how every program you use works?" | sed $'s/Did you know that you can also make these scripts yourself only when you put in time to learning how every program you use works?/\e[33m&\e[0m/' ;
+echo $"Bioinformatics is not something you are taught, it’s a way of life?" | sed $'s/Bioinformatics is not something you are taught, it’s a way of life?/\e[33m&\e[0m/' ;
 
 ##Get more on these color codes at https://stackoverflow.com/questions/5947742/how-to-change-the-output-color-of-echo-in-linux
 
