@@ -1,0 +1,87 @@
+#! /bin/bash
+
+start=$SECONDS
+echo $HOSTNAME
+
+echo $"Written by"  'Gerald Mboowa 🙏🧘 🍷🐒😍 ☣ 🇩🇪 ' | sed $'s/Gerald Mboowa 🙏🧘 🍷🐒😍 ☣ 🇩🇪 /\e[32m&\e[0m/';
+
+echo $"This is" 'FastQC MultiQC Human Variant Calling Script  Version 1.0.0' | sed $'s/astQC MultiQC Human Variant Calling Script  Version 1.0.0/\e[36m&\e[0m/';
+
+echo $"Author email"  '...@gmail.com' or '...@chs.mak.ac.ug' or '...@bcm.edu' or '...@alumni.bcm.edu' or '@cam.ac.uk' | sed $'s/...@gmail.com or ...@chs.mak.ac.ug or ...@bcm.edu or ...@alumni.bcm.edu or ...@cam.ac.uk/\e[33m&\e[0m/';
+
+cd ~/working-directory
+
+echo $"Now Running FastQC for the fastq Samples" | sed $'s/Now Running FastQC for the fastq Samples/\e[32m&\e[0m/' ;
+
+fastqc ${sample}*_1.fastq.gz  ${sample}*_2.fastq.gz
+
+echo $"Now Running MultiQC for the FastQC Products" | sed $'s/Now Running MultiQC for the FastQC Products/\e[36m&\e[0m/';
+
+multiqc .
+
+for sample in `cat list.txt`
+do
+    R1=${sample}_R1.fastq.gz
+    R2=${sample}_R2.fastq.gz
+
+echo $"Now Running Alignment of Fastq reads for the Samples using BWA" | sed $'s/Now Running Alignment of Fastq reads for the Samples using BWA/\e[31m&\e[0m/';
+
+
+bwa mem -R  "@RG\tID:0\tSM:${sample}\tPL:Illumina" ~/human_g1k_v37.fa $R1 $R2 > ${sample}.sam
+
+echo $"Now Running Converting Sam into Bam using Samtools" | sed $'s/Now Running Converting Sam into Bam using Samtools/\e[31m&\e[0m/';
+
+samtools view -bh ${sample}.sam > ${sample}.bam
+
+echo $"Now Running Sorting the Bam using PicardTools" | sed $'s/Now Running Sorting the Bam using PicardTools/\e[31m&\e[0m/';
+
+java -jar ~/picard.jar SortSam I= ${sample}.bam O=${sample}_sorted.bam SORT_ORDER=coordinate
+
+echo $"Now Running Marking PCR-Duplicates using PicardTools" | sed $'s/Now Running Marking PCR-Duplicates using PicardTools/\e[31m&\e[0m/';
+
+java -Xmx4g -jar ~/picard-tools-1.119/MarkDuplicates.jar INPUT=${sample}_sorted.bam OUTPUT=${sample}_sorted_dedup_reads.bam METRICS_FILE=${sample}_picard_info.txt REMOVE_DUPLICATES=true ASSUME_SORTED=true VALIDATION_STRINGENCY=LENIENT
+
+echo $"Now Running Indexing the Bam using Samtools" | sed $'s/Now Running Indexing the Bam using Samtools/\e[31m&\e[0m/';
+
+samtools index ${sample}_sorted_dedup_reads.bam
+
+echo $"Now Running TargetCreatorRealigner using GATK" | sed $'s/Now Running TargetCreatorRealigner using GATK/\e[31m&\e[0m/';
+
+java -jar ~/GenomeAnalysisTK.jar -T RealignerTargetCreator -R ~/human_g1k_v37.fa -I ${sample}_sorted_dedup_reads.bam --known ~/Know-snps-Indels/Mills_and_1000G_gold_standard.indels.hg19.sites.vcf.gz -o ${sample}_forIndelRealigner.intervals
+
+echo $"Now Running IndelRealignment using GATK" | sed $'s/Now Running IndelRealignment using GATK/\e[31m&\e[0m/';
+
+java -jar ~/GenomeAnalysisTK.jar -T IndelRealigner -R ~/human_g1k_v37.fa -I ${sample}_sorted_dedup_reads.bam -known ~/Know-snps-Indels/Mills_and_1000G_gold_standard.indels.hg19.sites.vcf.gz -targetIntervals ${sample}_forIndelRealigner.intervals -o ${sample}_Realigned_sorted_dedup_reads.bam
+
+##Generates an index for the bam automatically and continues on
+
+echo $"Now Running BaseRecalibration using GATK" | sed $'s/Now Running BaseRecalibration using GATK/\e[31m&\e[0m/';
+
+java -jar ~/GenomeAnalysisTK.jar -T BaseRecalibrator -R ~/human_g1k_v37.fasta -I ${sample}_sorted_dedup_reads.bam -knownSites ~/Know-snps-Indels/dbsnp.147.vcf.gz -o ${sample}_recal.table
+
+echo $"Now Running PrintReads using GATK" | sed $'s/Now Running PrintReads using GATK/\e[31m&\e[0m/';
+
+java -jar ~/GenomeAnalysisTK.jar -T PrintReads -R ~/human_g1k_v37.fasta -I ${sample}_Realigned_sorted_dedup_reads.bam -BQSR ${sample}_recal.table -o ${sample}_Re_calibrated_Realigned_sorted_dedup.bam
+
+echo $"Now Running Variant Discovery and Calling using GATK HaplotypeCaller" | sed $'s/Now Running Variant Discovery and Calling using GATK HaplotypeCaller/\e[31m&\e[0m/';
+
+java -jar ~/GenomeAnalysisTK.jar -T HaplotypeCaller -R ~/human_g1k_v37.fa -I ${sample}_Re_calibrated_Realigned_sorted_dedup.bam -o ${sample}_calls.vcf
+
+## Variant annotation using Annovar and selected databases
+
+echo $"Now Running Converting VCF to VCF4old that is Compatible with Annovar" | sed $'s/Now Running Converting VCF to VCF4old that is Compatible with Annovar/\e[31m&\e[0m/';
+
+perl ~/annovar/convert2annovar.pl --includeinfo -format vcf4old ${sample}_calls.vcf > ${sample}_calls.avinput
+
+echo $"Now Running Annotation of the Variants using Annovar" | sed $'s/Now Running Annotation of the Variants using Annovar/\e[31m&\e[0m/';
+
+perl ~/annovar/table_annovar.pl ${sample}.avinput ~/annovar/humandb/ -buildver hg19 -out ${sample}_myanno -remove -protocol refGene,cytoBand,genomicSuperDups,snp138,esp6500siv2_all,ljb26_all,1000g2015aug_afr,1000g2015aug_eas,1000g2015aug_eur,avsift,clinvar_20180603,dbnsfp30a,icgc21,exac03,exac03nonpsych,gerp++elem,caddgt20,gnomad_exome,gnomad_genome -operation g,r,r,f,f,f,f,f,f,f,f,f,f,f,f,f,f,f,f -nastring . -csvout
+
+echo $"Bioinformatics is not something you are taught, it’s a way of life?" | sed $'s/Bioinformatics is not something you are taught, it’s a way of life?/\e[33m&\e[0m/' ;
+
+##Get more on these color codes at https://stackoverflow.com/questions/5947742/how-to-change-the-output-color-of-echo-in-linux
+
+end=$SECONDS
+echo "duration: $((end-start)) seconds."
+done
+exit
