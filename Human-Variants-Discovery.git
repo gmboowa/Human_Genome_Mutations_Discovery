@@ -1,87 +1,77 @@
-#! /bin/bash
+#!/bin/bash
+# Title: Comprehensive FastQC, MultiQC, and Variant Calling Workflow
+# Author: Gerald Mboowa
+# Description: This script performs FastQC, MultiQC, alignment, variant calling, and annotation of human genome sequencing data.
+# It integrates tools like BWA, Samtools, GATK, and Annovar for a complete variant discovery workflow.
 
-start=$SECONDS
+# Start timing the script execution
+start_time=$(date +%s)
+
+# Display metadata
 echo $HOSTNAME
+echo $"Written by Gerald Mboowa 🙏🧘 🍷🐒😍 ☣ 🇩🇪" | sed $'s/Gerald Mboowa 🙏🧘 🍷🐒😍 ☣ 🇩🇪 /\e[32m&\e[0m/'
+echo $"FastQC MultiQC Human Variant Calling Script Version 1.0.0" | sed $'s/FastQC MultiQC Human Variant Calling Script Version 1.0.0/\e[36m&\e[0m/'
+echo $"Author email: ...@gmail.com or ...@chs.mak.ac.ug or ...@bcm.edu or ...@alumni.bcm.edu or ...@cam.ac.uk" | sed $'s/...@gmail.com or ...@chs.mak.ac.ug or ...@bcm.edu or ...@alumni.bcm.edu or ...@cam.ac.uk/\e[33m&\e[0m/'
 
-echo $"Written by"  'Gerald Mboowa 🙏🧘 🍷🐒😍 ☣ 🇩🇪 ' | sed $'s/Gerald Mboowa 🙏🧘 🍷🐒😍 ☣ 🇩🇪 /\e[32m&\e[0m/';
+# Step 1: Navigate to the working directory
+cd ~/working-directory || { echo "Error: Working directory not found!"; exit 1; }
 
-echo $"This is" 'FastQC MultiQC Human Variant Calling Script  Version 1.0.0' | sed $'s/astQC MultiQC Human Variant Calling Script  Version 1.0.0/\e[36m&\e[0m/';
+# Step 2: Run FastQC on input FASTQ files
+echo $"Running FastQC for the FASTQ samples" | sed $'s/Running FastQC for the FASTQ samples/\e[32m&\e[0m/'
+for sample in $(cat list.txt); do
+    fastqc "${sample}"*_1.fastq.gz "${sample}"*_2.fastq.gz
+done
 
-echo $"Author email"  '...@gmail.com' or '...@chs.mak.ac.ug' or '...@bcm.edu' or '...@alumni.bcm.edu' or '@cam.ac.uk' | sed $'s/...@gmail.com or ...@chs.mak.ac.ug or ...@bcm.edu or ...@alumni.bcm.edu or ...@cam.ac.uk/\e[33m&\e[0m/';
-
-cd ~/working-directory
-
-echo $"Now Running FastQC for the fastq Samples" | sed $'s/Now Running FastQC for the fastq Samples/\e[32m&\e[0m/' ;
-
-fastqc ${sample}*_1.fastq.gz  ${sample}*_2.fastq.gz
-
-echo $"Now Running MultiQC for the FastQC Products" | sed $'s/Now Running MultiQC for the FastQC Products/\e[36m&\e[0m/';
-
+# Step 3: Run MultiQC to aggregate FastQC results
+echo $"Running MultiQC for FastQC products" | sed $'s/Running MultiQC for FastQC products/\e[36m&\e[0m/'
 multiqc .
 
-for sample in `cat list.txt`
-do
-    R1=${sample}_R1.fastq.gz
-    R2=${sample}_R2.fastq.gz
+# Step 4: Process each sample for alignment, variant calling, and annotation
+for sample in $(cat list.txt); do
+    R1="${sample}_R1.fastq.gz"
+    R2="${sample}_R2.fastq.gz"
 
-echo $"Now Running Alignment of Fastq reads for the Samples using BWA" | sed $'s/Now Running Alignment of Fastq reads for the Samples using BWA/\e[31m&\e[0m/';
+    # Step 4.1: Align reads using BWA
+    echo $"Aligning reads for $sample using BWA" | sed $'s/Aligning reads for $sample using BWA/\e[31m&\e[0m/'
+    bwa mem -R "@RG\tID:0\tSM:${sample}\tPL:Illumina" ~/human_g1k_v37.fa "$R1" "$R2" > "${sample}.sam"
 
+    # Step 4.2: Convert SAM to BAM using Samtools
+    echo $"Converting SAM to BAM for $sample" | sed $'s/Converting SAM to BAM for $sample/\e[31m&\e[0m/'
+    samtools view -bh "${sample}.sam" > "${sample}.bam"
 
-bwa mem -R  "@RG\tID:0\tSM:${sample}\tPL:Illumina" ~/human_g1k_v37.fa $R1 $R2 > ${sample}.sam
+    # Step 4.3: Sort BAM file using Picard
+    echo $"Sorting BAM for $sample using Picard" | sed $'s/Sorting BAM for $sample using Picard/\e[31m&\e[0m/'
+    java -jar ~/picard.jar SortSam INPUT="${sample}.bam" OUTPUT="${sample}_sorted.bam" SORT_ORDER=coordinate
 
-echo $"Now Running Converting Sam into Bam using Samtools" | sed $'s/Now Running Converting Sam into Bam using Samtools/\e[31m&\e[0m/';
+    # Step 4.4: Mark PCR duplicates using Picard
+    echo $"Marking PCR duplicates for $sample using Picard" | sed $'s/Marking PCR duplicates for $sample using Picard/\e[31m&\e[0m/'
+    java -Xmx4g -jar ~/picard.jar MarkDuplicates INPUT="${sample}_sorted.bam" OUTPUT="${sample}_dedup.bam"         METRICS_FILE="${sample}_metrics.txt" REMOVE_DUPLICATES=true
 
-samtools view -bh ${sample}.sam > ${sample}.bam
+    # Step 4.5: Index BAM file using Samtools
+    echo $"Indexing BAM for $sample" | sed $'s/Indexing BAM for $sample/\e[31m&\e[0m/'
+    samtools index "${sample}_dedup.bam"
 
-echo $"Now Running Sorting the Bam using PicardTools" | sed $'s/Now Running Sorting the Bam using PicardTools/\e[31m&\e[0m/';
+    # Step 4.6: Realignment using GATK
+    echo $"Realigning indels for $sample using GATK" | sed $'s/Realigning indels for $sample using GATK/\e[31m&\e[0m/'
+    java -jar ~/GenomeAnalysisTK.jar -T RealignerTargetCreator -R ~/human_g1k_v37.fa -I "${sample}_dedup.bam"         --known ~/Known-snps-Indels/Mills_and_1000G_gold_standard.indels.hg19.sites.vcf.gz -o "${sample}_realigner.intervals"
+    java -jar ~/GenomeAnalysisTK.jar -T IndelRealigner -R ~/human_g1k_v37.fa -I "${sample}_dedup.bam"         -targetIntervals "${sample}_realigner.intervals" -o "${sample}_realigned.bam"
 
-java -jar ~/picard.jar SortSam I= ${sample}.bam O=${sample}_sorted.bam SORT_ORDER=coordinate
+    # Step 4.7: Base recalibration using GATK
+    echo $"Recalibrating bases for $sample using GATK" | sed $'s/Recalibrating bases for $sample using GATK/\e[31m&\e[0m/'
+    java -jar ~/GenomeAnalysisTK.jar -T BaseRecalibrator -R ~/human_g1k_v37.fa -I "${sample}_realigned.bam"         -knownSites ~/Known-snps-Indels/dbsnp.147.vcf.gz -o "${sample}_recal.table"
+    java -jar ~/GenomeAnalysisTK.jar -T PrintReads -R ~/human_g1k_v37.fa -I "${sample}_realigned.bam"         -BQSR "${sample}_recal.table" -o "${sample}_final.bam"
 
-echo $"Now Running Marking PCR-Duplicates using PicardTools" | sed $'s/Now Running Marking PCR-Duplicates using PicardTools/\e[31m&\e[0m/';
+    # Step 4.8: Variant discovery using GATK HaplotypeCaller
+    echo $"Calling variants for $sample using GATK HaplotypeCaller" | sed $'s/Calling variants for $sample using GATK HaplotypeCaller/\e[31m&\e[0m/'
+    java -jar ~/GenomeAnalysisTK.jar -T HaplotypeCaller -R ~/human_g1k_v37.fa -I "${sample}_final.bam"         -o "${sample}_variants.vcf"
 
-java -Xmx4g -jar ~/picard-tools-1.119/MarkDuplicates.jar INPUT=${sample}_sorted.bam OUTPUT=${sample}_sorted_dedup_reads.bam METRICS_FILE=${sample}_picard_info.txt REMOVE_DUPLICATES=true ASSUME_SORTED=true VALIDATION_STRINGENCY=LENIENT
-
-echo $"Now Running Indexing the Bam using Samtools" | sed $'s/Now Running Indexing the Bam using Samtools/\e[31m&\e[0m/';
-
-samtools index ${sample}_sorted_dedup_reads.bam
-
-echo $"Now Running TargetCreatorRealigner using GATK" | sed $'s/Now Running TargetCreatorRealigner using GATK/\e[31m&\e[0m/';
-
-java -jar ~/GenomeAnalysisTK.jar -T RealignerTargetCreator -R ~/human_g1k_v37.fa -I ${sample}_sorted_dedup_reads.bam --known ~/Know-snps-Indels/Mills_and_1000G_gold_standard.indels.hg19.sites.vcf.gz -o ${sample}_forIndelRealigner.intervals
-
-echo $"Now Running IndelRealignment using GATK" | sed $'s/Now Running IndelRealignment using GATK/\e[31m&\e[0m/';
-
-java -jar ~/GenomeAnalysisTK.jar -T IndelRealigner -R ~/human_g1k_v37.fa -I ${sample}_sorted_dedup_reads.bam -known ~/Know-snps-Indels/Mills_and_1000G_gold_standard.indels.hg19.sites.vcf.gz -targetIntervals ${sample}_forIndelRealigner.intervals -o ${sample}_Realigned_sorted_dedup_reads.bam
-
-##Generates an index for the bam automatically and continues on
-
-echo $"Now Running BaseRecalibration using GATK" | sed $'s/Now Running BaseRecalibration using GATK/\e[31m&\e[0m/';
-
-java -jar ~/GenomeAnalysisTK.jar -T BaseRecalibrator -R ~/human_g1k_v37.fasta -I ${sample}_sorted_dedup_reads.bam -knownSites ~/Know-snps-Indels/dbsnp.147.vcf.gz -o ${sample}_recal.table
-
-echo $"Now Running PrintReads using GATK" | sed $'s/Now Running PrintReads using GATK/\e[31m&\e[0m/';
-
-java -jar ~/GenomeAnalysisTK.jar -T PrintReads -R ~/human_g1k_v37.fasta -I ${sample}_Realigned_sorted_dedup_reads.bam -BQSR ${sample}_recal.table -o ${sample}_Re_calibrated_Realigned_sorted_dedup.bam
-
-echo $"Now Running Variant Discovery and Calling using GATK HaplotypeCaller" | sed $'s/Now Running Variant Discovery and Calling using GATK HaplotypeCaller/\e[31m&\e[0m/';
-
-java -jar ~/GenomeAnalysisTK.jar -T HaplotypeCaller -R ~/human_g1k_v37.fa -I ${sample}_Re_calibrated_Realigned_sorted_dedup.bam -o ${sample}_calls.vcf
-
-## Variant annotation using Annovar and selected databases
-
-echo $"Now Running Converting VCF to VCF4old that is Compatible with Annovar" | sed $'s/Now Running Converting VCF to VCF4old that is Compatible with Annovar/\e[31m&\e[0m/';
-
-perl ~/annovar/convert2annovar.pl --includeinfo -format vcf4old ${sample}_calls.vcf > ${sample}_calls.avinput
-
-echo $"Now Running Annotation of the Variants using Annovar" | sed $'s/Now Running Annotation of the Variants using Annovar/\e[31m&\e[0m/';
-
-perl ~/annovar/table_annovar.pl ${sample}.avinput ~/annovar/humandb/ -buildver hg19 -out ${sample}_myanno -remove -protocol refGene,cytoBand,genomicSuperDups,snp138,esp6500siv2_all,ljb26_all,1000g2015aug_afr,1000g2015aug_eas,1000g2015aug_eur,avsift,clinvar_20180603,dbnsfp30a,icgc21,exac03,exac03nonpsych,gerp++elem,caddgt20,gnomad_exome,gnomad_genome -operation g,r,r,f,f,f,f,f,f,f,f,f,f,f,f,f,f,f,f -nastring . -csvout
-
-echo $"Bioinformatics is not something you are taught, it’s a way of life?" | sed $'s/Bioinformatics is not something you are taught, it’s a way of life?/\e[33m&\e[0m/' ;
-
-##Get more on these color codes at https://stackoverflow.com/questions/5947742/how-to-change-the-output-color-of-echo-in-linux
-
-end=$SECONDS
-echo "duration: $((end-start)) seconds."
+    # Step 4.9: Variant annotation using Annovar
+    echo $"Annotating variants for $sample using Annovar" | sed $'s/Annotating variants for $sample using Annovar/\e[31m&\e[0m/'
+    perl ~/annovar/convert2annovar.pl -format vcf4old "${sample}_variants.vcf" > "${sample}_variants.avinput"
+    perl ~/annovar/table_annovar.pl "${sample}_variants.avinput" ~/annovar/humandb/ -buildver hg19 -out "${sample}_annotated"         -remove -protocol refGene,cytoBand,snp138,clinvar_20180603 -operation g,r,f,f -nastring . -csvout
 done
-exit
+
+# End timing the script
+end_time=$(date +%s)
+execution_time=$((end_time - start_time))
+echo "Workflow completed in $execution_time seconds."
