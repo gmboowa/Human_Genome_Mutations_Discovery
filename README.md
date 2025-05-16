@@ -1,11 +1,11 @@
 
-# Human Variant Calling & Annotation Pipeline
+# Human variant calling & annotation pipeline
 
-This is a comprehensive Bash pipeline for processing human whole-genome sequencing (WGS) data, including quality control, alignment, variant calling, and variant annotation.
+This bash pipeline for processing human whole-genome sequencing (WGS) data, including quality control, alignment, variant calling, and variant annotation.
 
 ---
 
-## Tools Used
+## Tools used
 
 - **FastQC** – Quality control checks on raw FASTQ files  
 - **MultiQC** – Aggregates FastQC reports  
@@ -17,7 +17,7 @@ This is a comprehensive Bash pipeline for processing human whole-genome sequenci
 
 ---
 
-## Input Requirements
+## Input requirements
 
 1. `list.txt` – A file with one sample name per line (no extensions).
 2. Paired-end FASTQ files for each sample (e.g., `sample_R1.fastq.gz`, `sample_R2.fastq.gz`).
@@ -26,7 +26,7 @@ This is a comprehensive Bash pipeline for processing human whole-genome sequenci
 
 ---
 
-## How to Run
+## How to run
 
 Make sure your script is executable:
 
@@ -55,7 +55,7 @@ For each sample, this pipeline generates:
 
 ---
 
-## Annovar Annotation Databases
+## Annovar annotation databases
 
 The script uses the following Annovar databases:
 
@@ -67,7 +67,7 @@ Ensure all databases are downloaded in `~/annovar/humandb/`.
 
 ---
 
-## Quote to Remember
+## Quote to remember
 
 > **"Bioinformatics is not something you are taught, it’s a way of life."**
 
