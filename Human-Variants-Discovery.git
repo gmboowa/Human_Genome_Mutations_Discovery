@@ -1,77 +1,108 @@
-#!/bin/bash
-# Title: Comprehensive FastQC, MultiQC, and Variant Calling Workflow
+
+#!/usr/bin/env bash
+# ==============================================================================
+# Genomic Analysis Pipeline - Human Whole Genome Sequencing
+# Version: 2.0.0
 # Author: Gerald Mboowa
-# Description: This script performs FastQC, MultiQC, alignment, variant calling, and annotation of human genome sequencing data.
-# It integrates tools like BWA, Samtools, GATK, and Annovar for a complete variant discovery workflow.
+# Contact: ...@bcm.edu | ...@cam.ac.uk
+# 
+# Features:
+# - Comprehensive QC & preprocessing
+# - GATK Best Practices variant calling
+# - Multi-sample joint genotyping
+# - Functional annotation integration
+# ==============================================================================
 
-# Start timing the script execution
-start_time=$(date +%s)
+set -eo pipefail
+trap 'handle_error $LINENO' ERR
 
-# Display metadata
-echo $HOSTNAME
-echo $"Written by Gerald Mboowa 🙏🧘 🍷🐒😍 ☣ 🇩🇪" | sed $'s/Gerald Mboowa 🙏🧘 🍷🐒😍 ☣ 🇩🇪 /\e[32m&\e[0m/'
-echo $"FastQC MultiQC Human Variant Calling Script Version 1.0.0" | sed $'s/FastQC MultiQC Human Variant Calling Script Version 1.0.0/\e[36m&\e[0m/'
-echo $"Author email: ...@gmail.com or ...@chs.mak.ac.ug or ...@bcm.edu or ...@alumni.bcm.edu or ...@cam.ac.uk" | sed $'s/...@gmail.com or ...@chs.mak.ac.ug or ...@bcm.edu or ...@alumni.bcm.edu or ...@cam.ac.uk/\e[33m&\e[0m/'
+# Configuration
+THREADS=$(nproc)
+MEMORY="32G"
+REF_GENOME="$HOME/resources/human_g1k_v37.fa"
+KNOWN_SITES=(
+    "$HOME/resources/dbsnp.147.vcf.gz"
+    "$HOME/resources/Mills_and_1000G_gold_standard.indels.hg19.sites.vcf.gz"
+)
+ANNOVAR_DB="$HOME/annovar/humandb/"
+OUTPUT_DIR="results"
+LOG_DIR="$OUTPUT_DIR/logs"
 
-# Step 1: Navigate to the working directory
-cd ~/working-directory || { echo "Error: Working directory not found!"; exit 1; }
+# Initialize directories
+mkdir -p "$OUTPUT_DIR/"{alignment,vcfs,annotations} "$LOG_DIR"
 
-# Step 2: Run FastQC on input FASTQ files
-echo $"Running FastQC for the FASTQ samples" | sed $'s/Running FastQC for the FASTQ samples/\e[32m&\e[0m/'
-for sample in $(cat list.txt); do
-    fastqc "${sample}"*_1.fastq.gz "${sample}"*_2.fastq.gz
-done
+# Functions
+handle_error() {
+    local line=$1
+    echo "Error occurred at line $line"
+    exit 1
+}
 
-# Step 3: Run MultiQC to aggregate FastQC results
-echo $"Running MultiQC for FastQC products" | sed $'s/Running MultiQC for FastQC products/\e[36m&\e[0m/'
-multiqc .
+log() {
+    local level=$1 msg=$2
+    printf "[%(%Y-%m-%dT%H:%M:%S)T] [%s] %s\n" -1 "$level" "$msg" | tee -a "$LOG_DIR/pipeline.log"
+}
 
-# Step 4: Process each sample for alignment, variant calling, and annotation
-for sample in $(cat list.txt); do
-    R1="${sample}_R1.fastq.gz"
-    R2="${sample}_R2.fastq.gz"
+run_step() {
+    local step_name=$1 cmd=$2
+    log "INFO" "Starting $step_name"
+    eval "$cmd" 2>> "$LOG_DIR/${step_name// /_}.log" || {
+        log "ERROR" "$step_name failed"
+        exit 1
+    }
+    log "INFO" "Completed $step_name"
+}
 
-    # Step 4.1: Align reads using BWA
-    echo $"Aligning reads for $sample using BWA" | sed $'s/Aligning reads for $sample using BWA/\e[31m&\e[0m/'
-    bwa mem -R "@RG\tID:0\tSM:${sample}\tPL:Illumina" ~/human_g1k_v37.fa "$R1" "$R2" > "${sample}.sam"
+# Pipeline
+main() {
+    log "INFO" "Pipeline started - Host: $HOSTNAME"
+    
+    # FastQC Analysis
+    run_step "FastQC" \
+        "fastqc -t $THREADS -o $OUTPUT_DIR/qc inputs/*.fastq.gz"
 
-    # Step 4.2: Convert SAM to BAM using Samtools
-    echo $"Converting SAM to BAM for $sample" | sed $'s/Converting SAM to BAM for $sample/\e[31m&\e[0m/'
-    samtools view -bh "${sample}.sam" > "${sample}.bam"
+    # MultiQC Report
+    run_step "MultiQC" \
+        "multiqc -o $OUTPUT_DIR/qc $OUTPUT_DIR/qc"
 
-    # Step 4.3: Sort BAM file using Picard
-    echo $"Sorting BAM for $sample using Picard" | sed $'s/Sorting BAM for $sample using Picard/\e[31m&\e[0m/'
-    java -jar ~/picard.jar SortSam INPUT="${sample}.bam" OUTPUT="${sample}_sorted.bam" SORT_ORDER=coordinate
+    # Process Samples
+    while read -r sample; do
+        local r1="inputs/${sample}_R1.fastq.gz"
+        local r2="inputs/${sample}_R2.fastq.gz"
 
-    # Step 4.4: Mark PCR duplicates using Picard
-    echo $"Marking PCR duplicates for $sample using Picard" | sed $'s/Marking PCR duplicates for $sample using Picard/\e[31m&\e[0m/'
-    java -Xmx4g -jar ~/picard.jar MarkDuplicates INPUT="${sample}_sorted.bam" OUTPUT="${sample}_dedup.bam"         METRICS_FILE="${sample}_metrics.txt" REMOVE_DUPLICATES=true
+        # Alignment
+        run_step "BWA Alignment ($sample)" \
+            "bwa mem -t $THREADS -R \"@RG\tID:$sample\tSM:$sample\tPL:ILLUMINA\" $REF_GENOME $r1 $r1 | samtools sort -@4 -o $OUTPUT_DIR/alignment/${sample}.bam"
 
-    # Step 4.5: Index BAM file using Samtools
-    echo $"Indexing BAM for $sample" | sed $'s/Indexing BAM for $sample/\e[31m&\e[0m/'
-    samtools index "${sample}_dedup.bam"
+        # Mark Duplicates
+        run_step "Mark Duplicates ($sample)" \
+            "gatk MarkDuplicates -I $OUTPUT_DIR/alignment/${sample}.bam -O $OUTPUT_DIR/alignment/${sample}.dedup.bam --METRICS_FILE $OUTPUT_DIR/alignment/${sample}.metrics.txt"
 
-    # Step 4.6: Realignment using GATK
-    echo $"Realigning indels for $sample using GATK" | sed $'s/Realigning indels for $sample using GATK/\e[31m&\e[0m/'
-    java -jar ~/GenomeAnalysisTK.jar -T RealignerTargetCreator -R ~/human_g1k_v37.fa -I "${sample}_dedup.bam"         --known ~/Known-snps-Indels/Mills_and_1000G_gold_standard.indels.hg19.sites.vcf.gz -o "${sample}_realigner.intervals"
-    java -jar ~/GenomeAnalysisTK.jar -T IndelRealigner -R ~/human_g1k_v37.fa -I "${sample}_dedup.bam"         -targetIntervals "${sample}_realigner.intervals" -o "${sample}_realigned.bam"
+        # BQSR
+        run_step "Base Recalibration ($sample)" \
+            "gatk BaseRecalibrator -I $OUTPUT_DIR/alignment/${sample}.dedup.bam -R $REF_GENOME --known-sites ${KNOWN_SITES[@]} -O $OUTPUT_DIR/alignment/${sample}.recal.table"
 
-    # Step 4.7: Base recalibration using GATK
-    echo $"Recalibrating bases for $sample using GATK" | sed $'s/Recalibrating bases for $sample using GATK/\e[31m&\e[0m/'
-    java -jar ~/GenomeAnalysisTK.jar -T BaseRecalibrator -R ~/human_g1k_v37.fa -I "${sample}_realigned.bam"         -knownSites ~/Known-snps-Indels/dbsnp.147.vcf.gz -o "${sample}_recal.table"
-    java -jar ~/GenomeAnalysisTK.jar -T PrintReads -R ~/human_g1k_v37.fa -I "${sample}_realigned.bam"         -BQSR "${sample}_recal.table" -o "${sample}_final.bam"
+        # Apply BQSR
+        run_step "Apply BQSR ($sample)" \
+            "gatk ApplyBQSR -R $REF_GENOME -I $OUTPUT_DIR/alignment/${sample}.dedup.bam --bqsr-recal-file $OUTPUT_DIR/alignment/${sample}.recal.table -O $OUTPUT_DIR/alignment/${sample}.final.bam"
 
-    # Step 4.8: Variant discovery using GATK HaplotypeCaller
-    echo $"Calling variants for $sample using GATK HaplotypeCaller" | sed $'s/Calling variants for $sample using GATK HaplotypeCaller/\e[31m&\e[0m/'
-    java -jar ~/GenomeAnalysisTK.jar -T HaplotypeCaller -R ~/human_g1k_v37.fa -I "${sample}_final.bam"         -o "${sample}_variants.vcf"
+        # Variant Calling (GVCF)
+        run_step "GVCF Generation ($sample)" \
+            "gatk HaplotypeCaller -R $REF_GENOME -I $OUTPUT_DIR/alignment/${sample}.final.bam -O $OUTPUT_DIR/vcfs/${sample}.g.vcf.gz -ERC GVCF"
+    done < samples.list
 
-    # Step 4.9: Variant annotation using Annovar
-    echo $"Annotating variants for $sample using Annovar" | sed $'s/Annotating variants for $sample using Annovar/\e[31m&\e[0m/'
-    perl ~/annovar/convert2annovar.pl -format vcf4old "${sample}_variants.vcf" > "${sample}_variants.avinput"
-    perl ~/annovar/table_annovar.pl "${sample}_variants.avinput" ~/annovar/humandb/ -buildver hg19 -out "${sample}_annotated"         -remove -protocol refGene,cytoBand,snp138,clinvar_20180603 -operation g,r,f,f -nastring . -csvout
-done
+    # Joint Genotyping
+    run_step "Joint Genotyping" \
+        "gatk GenomicsDBImport -R $REF_GENOME --genomicsdb-workspace-path $OUTPUT_DIR/vcfs/genomics_db -V samples.list"
 
-# End timing the script
-end_time=$(date +%s)
-execution_time=$((end_time - start_time))
-echo "Workflow completed in $execution_time seconds."
+    run_step "Joint Calling" \
+        "gatk GenotypeGVCFs -R $REF_GENOME -V gendb://$OUTPUT_DIR/vcfs/genomics_db -O $OUTPUT_DIR/vcfs/joint_calls.vcf.gz"
+
+    # Variant Annotation
+    run_step "ANNOVAR Annotation" \
+        "perl $HOME/annovar/table_annovar.pl $OUTPUT_DIR/vcfs/joint_calls.vcf.gz $ANNOVAR_DB -buildver hg19 -out $OUTPUT_DIR/annotations/final -protocol refGene,ensGene,gnomad211_genome,clinvar_20220320 -operation g,g,f,f -nastring . -vcfinput"
+
+    log "INFO" "Pipeline completed successfully"
+}
+
+main "$@"
